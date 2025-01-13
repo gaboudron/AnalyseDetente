@@ -8,63 +8,70 @@
 import SwiftUI
 import CoreMotion
 
-// Logique de calcul : fonction pour déterminer la hauteur du saut
-func calculateJumpHeight(time: Double) -> Double {
-    let gravity = 9.81 // Accélération due à la gravité (m/s²)
-    return (gravity * pow(time, 2)) / 8
-}
-
+// Instance globale de CMMotionManager
 let motionManager = CMMotionManager()
 
-func startTracking() async throws -> CMAcceleration {
-    return try await withCheckedThrowingContinuation { continuation in
-        if motionManager.isAccelerometerAvailable {
-            motionManager.accelerometerUpdateInterval = 0.01
-            motionManager.startAccelerometerUpdates(to: .main) { (data, error) in
-                if let error = error {
-                    // Signale une erreur via la continuation
-                    continuation.resume(throwing: error)
-                } else if let acceleration = data?.acceleration {
-                    // Renvoie les données via la continuation
-                    continuation.resume(returning: acceleration)
-                }
+// Fonction pour démarrer le suivi de l'accélération
+func startTracking(updateHandler: @escaping (Double) -> Void) {
+    if motionManager.isAccelerometerAvailable {
+        motionManager.accelerometerUpdateInterval = 0.1 // Mise à jour toutes les 100 ms
+        motionManager.startAccelerometerUpdates(to: .main) { data, error in
+            if let error = error {
+                print("Erreur : \(error.localizedDescription)")
+                return
             }
-        } else {
-            // Signale une erreur si l'accéléromètre n'est pas disponible
-            continuation.resume(throwing: NSError(domain: "CoreMotionError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Accéléromètre non disponible"]))
+            if let acceleration = data?.acceleration {
+                // Transmet l'accélération en Y via le handler
+                updateHandler(acceleration.y)
+            }
         }
+    } else {
+        print("Accéléromètre non disponible.")
     }
 }
 
+// Fonction pour arrêter le suivi de l'accéléromètre
+func stopTracking() {
+    if motionManager.isAccelerometerActive {
+        motionManager.stopAccelerometerUpdates()
+        print("Suivi arrêté.")
+    }
+}
+
+func calculateJumpHeight(time: Double) -> Double {
+    let g = 9.81
+    return 0.5 * g * pow(time, 2)
+}
+
 struct ContentView: View {
-    // Variable d'état pour stocker le résultat
     @State private var jumpHeight: Double = 0.0
-    @State private var accelerationY: Double = 0.0
+    @State private var isJumping: Bool = false
+    @State private var startTime: Date? = nil
+
+    let seuil = 0.8 // Seuil pour détecter un saut
 
     var body: some View {
         VStack {
-            // Affichage de la hauteur du saut
-            /*Text("Détente verticale : \(jumpHeight, specifier: "%.2f") mètres")
+            Text("Hauteur du saut : \(jumpHeight, specifier: "%.2f") mètres")
                 .padding()
 
-            // Bouton pour simuler le calcul
-            Button("Calculer") {
-                // Simule un temps de vol et met à jour la hauteur
-                let simulatedTime = 0.5 // Exemple : 0.5 seconde de temps de vol
-                jumpHeight = calculateJumpHeight(time: simulatedTime)
-            }
-            .padding()*/
-            Text("Accélération en Y : \(accelerationY, specifier: "%.2f")")
-                        .padding()
-
             Button("Démarrer le suivi") {
-                Task {
-                    do {
-                        let acceleration = try await startTracking()
-                        // Mets à jour l'accélération en Y
-                        accelerationY = acceleration.y
-                    } catch {
-                        print("Erreur : \(error.localizedDescription)")
+                startTracking { accelerationY in
+                    // Détection du début d'un saut
+                    if !isJumping && accelerationY > seuil {
+                        isJumping = true
+                        startTime = Date()
+                        print("Début du saut détecté")
+                    }
+
+                    // Détection de la fin du saut
+                    if isJumping && abs(accelerationY) < 0.2 {
+                        if let start = startTime {
+                            let jumpDuration = Date().timeIntervalSince(start)
+                            jumpHeight = calculateJumpHeight(time: jumpDuration)
+                            print("Fin du saut détecté : durée = \(jumpDuration) s, hauteur = \(jumpHeight) m")
+                        }
+                        isJumping = false
                     }
                 }
             }
